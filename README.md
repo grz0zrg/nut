@@ -1,11 +1,14 @@
 # nut
 ---
-### Minimalist build system for JavaScript app.
+**Minimalist build system for JavaScript app.**
 
-This is a **minimalist build system** to write JS applications without hassles.
+This is a **minimalist build system** to write JS app. without hassles.
+
+This program is written with the [Anubis language](https://fr.wikipedia.org/wiki/Anubis_(langage))
+
 Could be adapted/extended to other ends easily.
 
-It is basically a simple pre-processor which produce a single debug and production ready file each time a file change in the app. src directory, it is recursive.
+It is basically a simple pre-processor producing a single debug and production ready file each time a file change in the app. src directory, it is recursive.
 
 Files modification date are checked against the build files modification date, if one file appear to be more recent than the build files, the build system trigger itself.
 
@@ -31,8 +34,7 @@ Features:
 
 This support sub-applications as well, just create as many entry point files as wanted.
 
-Usage: anbexec nut [output_filename].[js|css]
+Usage: `anbexec nut [output_filename].[js|css]`
 
-Nut - 2014/2017
 ---
-by Julien Verneuil (grz0zrg)
+by Julien Verneuil (grz0zrg) 2014/2017
