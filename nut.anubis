@@ -1,0 +1,257 @@
+ Nut - Minimalist build system for JavaScript app.
+
+ This is a minimalist build system to write JS applications without hassles.
+ Could be adapted/extended to other ends easily, it is basically a simple pre-processor
+ which produce a single debug and a production ready file each time a file change in the app. src directory, it is recursive.
+
+ Actually, files modification date are checked against the build files modification date, if one file appear to be more recent than the build files, the build system trigger itself.
+
+ You only need to pass the plain output file (either CSS or JS), Nut will look at an entry point file which will be the base of your applications,
+ in this file you can then use directives such as include as follow: /*#include [FILENAME]*/
+ Nut will read the entry point file sequentially, include the content of [FILENAME] if the directive is encountered
+ and output a single file application in a dist folder, CSS and JS is automatically detected from the file extension and a program such as a minifier will be called and output a production ready file as well.
+
+ Base requirement for web. applications with JS and CSS (basic setup):
+  - "uglifyjs" and "csso" should be installed with Node/NPM "npm install uglifyjs csso"
+  - The app. folder should contain a "js" and "css" folder
+  - "js" folder should contain a file named "app_[APP_NAME].js" where [APP_NAME] is your application name
+  - "css" folder should contain a file named "app_[APP_NAME].css" where [APP_NAME] is your application name
+  - Call Nut in the app. root directory with "anbexec nut [APP_NAME].js"
+  - Call Nut in the app. root directory with "anbexec nut [APP_NAME].css"
+  - The debug and production ready files will be available in the "dist" folder as [APP_NAME].js [APP_NAME].css [APP_NAME].min.js [APP_NAME].min.css
+
+ Features:
+  - Automatized background build by comparing changes between build files and files in the "js" and "css" folder every two seconds (recursive)
+  - Produce debug and production ready files, minified & optimized CSS and JS output in a "dist" folder
+  - Parse /*#include [FILENAME]*/ directives to provide KISS modularity (only in the src root directory and specific directories like workers)
+  - Fast & minimalist :)
+
+ This support sub-applications as well, just create as many entry point files as wanted.
+
+ Usage: anbexec nut [output_filename].[js|css]
+
+ Nut 2014 - 2017
+ ----------------------------
+ by Julien Verneuil (grz0zrg)
+
+read tools/basis.anubis
+read tools/streams.anubis
+read system/string.anubis
+read system/files.anubis
+
+define One seek_include
+    (
+        String filename,
+        WStream out
+    ).
+
+public define macro Maybe(Int)
+    Maybe(Int) x | Maybe(Int) y =
+        if x is
+        {
+            failure then
+                if y is
+                {
+                    failure then failure,
+                    success(n) then success(n)
+                },
+            success(n) then success(n)
+        }.
+
+define Maybe(String) get_string_after_comment_tag
+    (
+        String str
+    ) =
+        if find("/", str, 0) is
+        {
+            failure then failure,
+            success(n) then
+                if find("*", str, n) is
+                {
+                    failure then failure,
+                    success(n2) then
+                        success(substr(str, n2, length(str) - n2 - 1))
+                }
+        }.
+
+
+define Maybe(String) get_line_comment_content
+    (
+        String str
+    ) =
+        if get_string_after_comment_tag(str) is
+        {
+            failure then failure,
+            success(content) then
+                with reversed_str = implode(reverse(explode(content))),
+                if get_string_after_comment_tag(reversed_str) is
+                {
+                    failure then failure,
+                    success(content2) then
+                        success(implode(reverse(explode(content2))))
+                }
+        }.
+
+define One one_file
+    (
+        Stream s,
+        WStream out
+    ) =
+        if read_line(s) is
+        {
+            failure    then unique,
+            success(l) then
+                if get_line_comment_content(l) is
+                {
+                    failure then print(out, l)
+                    success(lc) then
+                        with _include = "#include ",
+                        if find(_include, lc, 0) is
+                        {
+                            failure    then print(out, l),
+                            success(n) then
+                                with k = n + length(_include),
+                                seek_include(substr(lc, k, length(lc) - k - 1), out)
+                        }
+                };
+            one_file(s, out)
+        }.
+
+define One seek_include
+    (
+        String filename,
+        WStream out
+    ) =
+        if file(filename, read) is
+        {
+            failure      then
+              println("File not found: " + filename)
+            success(f)   then
+                with s = make_stream(f),
+                    one_file(s, out)
+        }.
+
+define Word32 last_modified
+    (
+        FileDescription fd
+    ) =
+        if fd is
+        {
+            no_info(name)            then 0,
+            file(name,size,mode,lm)  then lm,
+            link(name,value,mode,lm) then lm,
+            directory(name,mode,lm)  then lm
+        }.
+
+define Bool compare_date
+    (
+        FileDescription fd1,
+        FileDescription fd2
+    ) =
+        last_modified(fd1) >+ last_modified(fd2).
+
+define Bool changed
+    (
+        String root,
+        String out_name,
+        String filetype,
+        String min_output_filename
+    ).
+
+define Bool subchanged
+    (
+        String root,
+        String out_name,
+        String filetype,
+        String min_output_filename,
+        List(FileDescription) fdescs,
+    ) =
+    if fdescs is
+    {
+       []      then false,
+       [h . t] then
+         if changed(root + "/" + name(h), out_name, filetype, min_output_filename) then
+           true
+         else
+           subchanged(root, out_name, filetype, min_output_filename, t)
+    }.
+
+define Bool changed
+    (
+        String root,
+        String out_name,
+        String filetype,
+        String min_output_filename
+    ) =
+        with descs  = directory_full_list(root + "/", "*." + filetype, "", "") + directory_full_list("../dist/", out_name, "", "") + directory_full_list("../dist/", min_output_filename, "", ""),
+             descs1 = merge_sort(descs, compare_date),
+             if if descs1 is
+             {
+                []      then false,
+                [h . t] then
+                    if name(h) = out_name
+                    then false
+                    else if name(h) = min_output_filename
+                    then false
+                    else
+                        println("'" + name(h) + "' was modified.");
+                        true
+             } then
+               println("Updating...");
+               true
+             else
+               subchanged(root, out_name, filetype, min_output_filename, directory_full_list(root, "", "", "*")).
+
+define One execute_build_program
+    (
+        String program,
+        List(String) args
+    ) =
+        if execute(get_current_directory, program, args) is
+        {
+            failure then println(program + "execute has failed"),
+            success(b) then unique
+        }.
+
+define One merge
+    (
+        String filetype,
+        String filename,
+        String min_output_filename,
+        String build_program_name,
+        List(String) build_program_args
+    ) =
+        if changed(".", filename, filetype, min_output_filename)
+        then
+        make_directories("../dist");
+        if file("../dist/"+filename, new) is
+        {
+            failure      then println("Cannot create file: " + filename),
+            success(out) then
+                seek_include("app_" + filename, weaken(out));
+                execute_build_program(build_program_name, build_program_args)
+        }
+        else
+            unique.
+
+global define One nut
+    (
+        List(String) args
+    ) =
+        if args is
+        {
+            [ ] then println("Usage: anbexec nut [output_filename].[js|css]"),
+            [filename . t] then
+                (if ends_with(filename, ".js") then
+                    with min_output_filename = substr(filename, 0, length(filename) - 2) + "min.js",
+                    merge("js", filename, min_output_filename, "uglifyjs", ["--compress", "--mangle","--screw-ie8", "-o", "../dist/"+min_output_filename, "--", "../dist/"+filename])
+                else if ends_with(filename, ".css") then
+                    with min_output_filename = substr(filename, 0, length(filename) - 3) + "min.css",
+                    merge("css", filename, min_output_filename, "csso", ["../dist/"+filename, "../dist/"+min_output_filename])
+                else
+                    println("Entry point file extension not recognized.");
+                    unique);
+
+                sleep(2000);
+                nut(args)
+        }.
