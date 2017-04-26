@@ -1,6 +1,6 @@
  Nut - Minimalist build system for JavaScript app.
 
- Usage: anbexec nut [output_filename].[js|css] ...
+ Usage: anbexec nut -appfile:"[app_filename].[js|css]" ...
 
  Nut 2014 - 2017
  ----------------------------
@@ -8,6 +8,7 @@
 
 read tools/basis.anubis
 read tools/streams.anubis
+read tools/cmd_line.anubis
 read system/string.anubis
 read system/files.anubis
 
@@ -113,7 +114,7 @@ define Word32 last_modified
     ) =
         if fd is
         {
-            no_info(name)            then 0,
+            no_info(name)            then println("File " + name + " has no infos attached. (ignored)"); 0,
             file(name,size,mode,lm)  then lm,
             link(name,value,mode,lm) then lm,
             directory(name,mode,lm)  then lm
@@ -193,6 +194,7 @@ define One merge
     (
         String root,
         String filetype,
+        String prefix,
         String filename,
         String min_output_filename,
         String build_program_name,
@@ -204,7 +206,7 @@ define One merge
         {
             failure      then println("Cannot create file " + filename + " in the dist directory."),
             success(out) then
-                seek_include(root, "app_" + filename, weaken(out));
+                seek_include(root, prefix + filename, weaken(out));
                 execute_build_program(build_program_name, build_program_args)
         }
         else
@@ -212,6 +214,7 @@ define One merge
 
 define One watch
     (
+        String prefix,
         List(String) args,
         List(String) current
     ) =
@@ -219,19 +222,54 @@ define One watch
         {
             [ ] then
                 sleep(2000);
-                watch(args, args),
+                watch(prefix, args, args),
             [filename . t] then
                 since ((String,String))split_path(filename) is (root,fname),
                 (if ends_with(filename, ".js") then
                     with min_output_filename = substr(fname, 0, length(fname) - 2) + "min.js",
-                    merge(root + "/", "js", fname, min_output_filename, "uglifyjs", ["--compress", "--mangle","--screw-ie8", "-o", "dist/"+min_output_filename, "--", "dist/"+fname])
+                    merge(root + "/", "js", prefix, fname, min_output_filename, "uglifyjs", ["--compress", "--mangle","--screw-ie8", "-o", "dist/"+min_output_filename, "--", "dist/"+fname])
                 else if ends_with(filename, ".css") then
                     with min_output_filename = substr(fname, 0, length(fname) - 3) + "min.css",
-                    merge(root + "/", "css", fname, min_output_filename, "csso", ["dist/"+fname, "dist/"+min_output_filename])
+                    merge(root + "/", "css", prefix, fname, min_output_filename, "csso", ["dist/"+fname, "dist/"+min_output_filename])
                 else
-                    println("Entry point file " + filename + " extension not recognized.");
+                    println("App file " + filename + " extension not recognized.");
                     unique);
-                watch(args, t)
+                watch(prefix, args, t)
+        }.
+
+define One watch
+    (
+        List(String) args,
+        List(String) current
+    ) =
+        watch("", args, current).
+
+define List(String) get_filelist
+    (
+        String root,
+        List(FileDescription) descs,
+        List(String) files
+    ) =
+        if descs is
+        {
+            []      then files,
+            [h . t] then
+              get_filelist(root, t, [ root + "/" + name(h) . files ])
+        }.
+
+define One watch_dirs
+    (
+        List(String) dirs
+    ) =
+        if dirs is
+        {
+            [ ] then unique,
+            [dir . t] then
+                with files_js = get_filelist(dir, directory_full_list(dir, "*.js", "", ""), []),
+                     files_css = get_filelist(dir, directory_full_list(dir, "*.css", "", ""), []),
+                delegate protect watch(files_js, files_js),
+                delegate protect watch(files_css, files_css),
+                watch_dirs(t)
         }.
 
 global define One nut
@@ -240,8 +278,11 @@ global define One nut
     ) =
         if args is
         {
-            [ ] then println("Usage: anbexec nut [output_filename].[js|css] ..."),
+            [ ] then println("Usage: anbexec nut -appfile:\"[output_filename].[js|css]\" ..."),
             [filename . t] then
+                with appfiles = get_parameters(args,(String s) |-> extract_String(s,"-appfile:")),
+                with appdir = get_parameters(args,(String s) |-> extract_String(s,"-appdir:")),
                 make_directories("dist");
-                watch(args, args)
+                watch_dirs(appdir);
+                watch("app_", appfiles, appfiles)
         }.
