@@ -130,6 +130,7 @@ define Bool compare_date
 define Bool changed
     (
         String root,
+        String sub_output_dir,
         String out_name,
         String filetype,
         String min_output_filename
@@ -138,6 +139,7 @@ define Bool changed
 define Bool subchanged
     (
         String root,
+        String sub_output_dir,
         String out_name,
         String filetype,
         String min_output_filename,
@@ -147,20 +149,21 @@ define Bool subchanged
     {
        []      then false,
        [h . t] then
-         if changed(root + "/" + name(h), out_name, filetype, min_output_filename) then
+         if changed(root + "/" + name(h), sub_output_dir, out_name, filetype, min_output_filename) then
            true
          else
-           subchanged(root, out_name, filetype, min_output_filename, t)
+           subchanged(root, sub_output_dir, out_name, filetype, min_output_filename, t)
     }.
 
 define Bool changed
     (
         String root,
+        String sub_output_dir,
         String out_name,
         String filetype,
         String min_output_filename
     ) =
-        with descs  = directory_full_list(root, "*." + filetype, "", "") + directory_full_list("dist/", out_name, "", "") + directory_full_list("dist/", min_output_filename, "", ""),
+        with descs  = directory_full_list(root, "*." + filetype, "", "") + directory_full_list("dist/"+sub_output_dir+"/", out_name, "", "") + directory_full_list("dist/"+sub_output_dir+"/", min_output_filename, "", ""),
              descs1 = merge_sort(descs, compare_date),
              if if descs1 is
              {
@@ -177,7 +180,7 @@ define Bool changed
                println("Building " + out_name + "...");
                true
              else
-               subchanged(root, out_name, filetype, min_output_filename, directory_full_list(root, "", "", "*")).
+               subchanged(root, sub_output_dir, out_name, filetype, min_output_filename, directory_full_list(root, "", "", "*")).
 
 define One execute_build_program
     (
@@ -193,6 +196,7 @@ define One execute_build_program
 define One merge
     (
         String root,
+        String sub_output_dir,
         String filetype,
         String prefix,
         String filename,
@@ -200,9 +204,9 @@ define One merge
         String build_program_name,
         List(String) build_program_args
     ) =
-        if changed(root, filename, filetype, min_output_filename)
+        if changed(root, sub_output_dir, filename, filetype, min_output_filename)
         then
-        if file("dist/"+filename, new) is
+        if file("dist/"+sub_output_dir+"/"+filename, new) is
         {
             failure      then println("Cannot create file " + filename + " in the dist directory."),
             success(out) then
@@ -215,6 +219,7 @@ define One merge
 define One watch
     (
         String prefix,
+        String sub_output_dir,
         List(String) args,
         List(String) current
     ) =
@@ -222,27 +227,28 @@ define One watch
         {
             [ ] then
                 sleep(2000);
-                watch(prefix, args, args),
+                watch(prefix, sub_output_dir, args, args),
             [filename . t] then
                 since ((String,String))split_path(filename) is (root,fname),
                 (if ends_with(filename, ".js") then
                     with min_output_filename = substr(fname, 0, length(fname) - 2) + "min.js",
-                    merge(root + "/", "js", prefix, fname, min_output_filename, "uglifyjs", ["--compress", "--mangle","--screw-ie8", "-o", "dist/"+min_output_filename, "--", "dist/"+fname])
+                    merge(root + "/", sub_output_dir, "js", prefix, fname, min_output_filename, "uglifyjs", ["--compress", "--mangle","--screw-ie8", "-o", "dist/"+sub_output_dir+"/"+min_output_filename, "--", "dist/"+sub_output_dir+"/"+fname])
                 else if ends_with(filename, ".css") then
                     with min_output_filename = substr(fname, 0, length(fname) - 3) + "min.css",
-                    merge(root + "/", "css", prefix, fname, min_output_filename, "csso", ["dist/"+fname, "dist/"+min_output_filename])
+                    merge(root + "/", sub_output_dir, "css", prefix, fname, min_output_filename, "csso", ["dist/"+sub_output_dir+"/"+fname, "dist/"+sub_output_dir+"/"+min_output_filename])
                 else
                     println("App file " + filename + " extension not recognized.");
                     unique);
-                watch(prefix, args, t)
+                watch(prefix, sub_output_dir, args, t)
         }.
 
 define One watch
     (
+        String sub_output_dir,
         List(String) args,
-        List(String) current
+        List(String) current,
     ) =
-        watch("", args, current).
+        watch("", sub_output_dir, args, current).
 
 define List(String) get_filelist
     (
@@ -263,13 +269,22 @@ define One watch_dirs
     ) =
         if dirs is
         {
-            [ ] then unique,
+            [ ] then
+              unique,
+
             [dir . t] then
                 with files_js = get_filelist(dir, directory_full_list(dir, "*.js", "", ""), []),
                      files_css = get_filelist(dir, directory_full_list(dir, "*.css", "", ""), []),
-                delegate protect watch(files_js, files_js),
-                delegate protect watch(files_css, files_css),
-                watch_dirs(t)
+                     mb_subdir = last(split_by_token(dir, '/')),
+                if mb_subdir is {
+                    failure then
+                        watch_dirs(t),
+
+                    success(subdir) then
+                        delegate protect watch(subdir, files_js, files_js),
+                        delegate protect watch(subdir, files_css, files_css),
+                        watch_dirs(t)
+                }
         }.
 
 global define One nut
@@ -284,5 +299,5 @@ global define One nut
                 with appdir = get_parameters(args,(String s) |-> extract_String(s,"-appdir:")),
                 make_directories("dist");
                 watch_dirs(appdir);
-                watch("app_", appfiles, appfiles)
+                watch("app_", "", appfiles, appfiles)
         }.
